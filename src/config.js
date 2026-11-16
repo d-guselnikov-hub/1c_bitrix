@@ -61,6 +61,7 @@ for (let i = 1; i <= 9; i++) {
   companies.push({
     id: e(p + 'ID', 'c' + i), name,
     url: e(p + 'ODATA_URL').replace(/\/+$/, ''), user: e(p + 'ODATA_USER'), password: e(p + 'ODATA_PASSWORD'),
+    adminOnly: e(p + 'ADMIN_ONLY') === '1', // компанию видят только администраторы приложения
   });
 }
 // Старый формат с одной базой
@@ -71,7 +72,7 @@ if (!companies.length && config.odataUrl) {
 if (!companies.length) {
   console.warn('[config] Базы 1С не настроены. Включаю MOCK-режим.');
   config.mock = true;
-  companies.push({ id: 'moy', name: 'Мой арбитр' }, { id: 'arbitr', name: 'АрбитрЪ' });
+  companies.push({ id: 'moy', name: 'Мой арбитр' }, { id: 'arbitr', name: 'АрбитрЪ', adminOnly: e('MOCK_ADMIN_ONLY') === '1' });
 }
 if (companies.some(c => !c.url) && !config.mock) {
   console.warn('[config] У компаний без ODATA_URL запросы будут возвращать ошибку: ' + companies.filter(c => !c.url).map(c => c.name).join(', '));

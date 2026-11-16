@@ -257,8 +257,9 @@ async function buildCompanyReport(conn, { from, to }) {
 }
 
 // companyId: id компании, либо 'all' (обе вместе)
-export async function buildReport({ from, to, company = 'all' }) {
-  const list = company === 'all' ? companies : companies.filter(c => c.id === company);
+export async function buildReport({ from, to, company = 'all', allowed = null }) {
+  const pool = allowed ? companies.filter(c => allowed.includes(c.id)) : companies;
+  const list = company === 'all' ? pool : pool.filter(c => c.id === company);
   if (!list.length) throw new Error('Неизвестная компания');
   if (list.length === 1) return { ...(await buildCompanyReport(list[0], { from, to })), company: list[0].id };
 

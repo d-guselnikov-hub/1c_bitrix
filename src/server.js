@@ -28,7 +28,7 @@ const indexHtml = () => fs.readFileSync(path.join(publicDir, 'index.html'), 'utf
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function renderApp(res, user) {
-  const boot = JSON.stringify({ session: signSession(user), user: user.name, mock: config.mock, companies: companies.map(c => ({ id: c.id, name: c.name })), portal: config.bitrixDomain, admin: isAdmin(user.id), role: userScope(user.id)?.role || '' }).replace(/</g, '\\u003c');
+  const boot = JSON.stringify({ session: signSession(user), user: user.name, mock: config.mock, companies: visibleCompanies(user.id).map(c => ({ id: c.id, name: c.name })), portal: config.bitrixDomain, admin: isAdmin(user.id), role: userScope(user.id)?.role || '' }).replace(/</g, '\\u003c');
   // Версия файлов в адресе, чтобы Битрикс/браузер не держал старый app.js после обновления
   const ver = f => { try { return Math.floor(fs.statSync(path.join(publicDir, f)).mtimeMs); } catch { return 0; } };
   res.setHeader('Cache-Control', 'no-store');
@@ -100,6 +100,9 @@ app.post('/api/invoice/create', requireSession, invalidDeal, requireInvoiceRight
 
 app.use('/static', express.static(publicDir, { index: false, maxAge: '1h' }));
 
+// Компании с флагом adminOnly видят только администраторы приложения
+function visibleCompanies(id) { return isAdmin(id) ? companies : companies.filter(c => !c.adminOnly); }
+
 // ---- API ----
 function requireSession(req, res, next) {
   const user = config.devNoAuth ? { id: '30833' } : readSession(req.get('X-Session'));
@@ -154,9 +157,12 @@ app.get('/api/report', requireSession, async (req, res) => {
   const to = parseDate(req.query.to, new Date(now.getFullYear(), now.getMonth(), now.getDate()));
   if (from > to) return res.status(400).json({ error: 'Дата начала позже даты окончания' });
 
-  const company = String(req.query.company || 'all');
-  if (company !== 'all' && !companies.some(c => c.id === company)) return res.status(400).json({ error: 'Неизвестная компания' });
-  const key = `${company}|${from.toDateString()}|${to.toDateString()}`;
+  const visible = visibleCompanies(req.user.id);
+  let company = String(req.query.company || 'all');
+  if (visible.length === 1) company = visible[0].id;
+  if (company !== 'all' && !visible.some(c => c.id === company)) return res.status(403).json({ error: 'Нет доступа к этой компании' });
+  const allowed = visible.map(c => c.id);
+  const key = `${company}|${allowed.join(',')}|${from.toDateString()}|${to.toDateString()}`;
   const scope = userScope(req.user.id);
   const send = async (data, cached) => {
     const idx = await getBranchIndex().catch(() => null);
@@ -167,7 +173,7 @@ app.get('/api/report', requireSession, async (req, res) => {
   try {
     // Не дёргаем 1С параллельно одинаковыми запросами
     if (!inflight.has(key)) {
-      inflight.set(key, buildReport({ from, to, company }).finally(() => inflight.delete(key)));
+      inflight.set(key, buildReport({ from, to, company, allowed }).finally(() => inflight.delete(key)));
     }
     const data = await inflight.get(key);
     cache.set(key, { at: Date.now(), data });

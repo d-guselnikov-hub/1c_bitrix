@@ -129,6 +129,7 @@ docker compose up -d --build
 | `BITRIX_DOMAIN` | myarbitr.bitrix24.kz | единственный портал, которому разрешён запуск |
 | `BITRIX_WEBHOOK` | | входящий вебхук (crm, user, department) |
 | `CO1_ID`, `CO1_NAME`, `CO1_ODATA_URL`, `CO1_ODATA_USER`, `CO1_ODATA_PASSWORD` | | компания 1 (до `CO9_*`). Счета выставляются из компании с id `moy` |
+| `CO2_ADMIN_ONLY` | 0 | 1 = компанию видят только администраторы приложения (так настроен АрбитрЪ) |
 | `ACC_RECEIVABLE` | 1210 | счета дебиторки |
 | `ACC_ADVANCES` | 3510 | счета авансов |
 | `PAYMENT_TERM_DAYS` | 5 | срок оплаты, дней |
