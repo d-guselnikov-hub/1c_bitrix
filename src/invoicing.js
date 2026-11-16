@@ -60,16 +60,21 @@ export async function createInvoice(dealId, { amount, service }) {
   if (locks.has(dealId)) throw new Error('Счёт по этой сделке уже создаётся, подождите');
   locks.add(dealId);
   try {
-    const { deal, clientName } = await loadDeal(dealId);
+    const { deal, clientName, existing } = await loadDeal(dealId);
     if (!clientName) throw new Error('У сделки нет контакта или компании');
     const c = conn();
+    const marker = `Сделка Битрикс24 #${dealId}`;
+    // Если прошлая попытка создала счёт в 1С, а Битрикс отказал, повторно в 1С не создаём
+    const prev = (await odataGetAll(c, 'Document_СчетНаОплатуПокупателю', { $filter: `Комментарий eq '${marker}' and DeletionMark eq false` }))
+      .filter(d => Number(d.СуммаДокумента) === amount)
+      .find(d => !existing.some(e => String(e.accountNumber || '').replace(/^1С-/, '') === String(d.Number).replace(/^0+/, '')));
     const tpl = await templateInvoice();
-    let { match, template } = await findClient(clientName);
+    let { match, template } = prev ? { match: null, template: null } : await findClient(clientName);
 
     // 1. Клиент
     let client = match;
     let createdClient = false;
-    if (!client) {
+    if (!client && !prev) {
       if (!template) throw new Error('Нет образца контрагента в 1С');
       client = await odataPost(c, 'Catalog_Контрагенты', {
         Parent_Key: template.Parent_Key, Description: clientName, НаименованиеПолное: clientName,
@@ -79,12 +84,12 @@ export async function createInvoice(dealId, { amount, service }) {
     }
 
     // 2. Договор
-    let contractKey = client.ОсновнойДоговорКонтрагента_Key;
-    if (!contractKey || contractKey === EMPTY) {
+    let contractKey = prev ? prev.ДоговорКонтрагента_Key : client.ОсновнойДоговорКонтрагента_Key;
+    if (!prev && (!contractKey || contractKey === EMPTY)) {
       const contracts = await odataGetAll(c, 'Catalog_ДоговорыКонтрагентов', { $filter: `Owner_Key eq guid'${client.Ref_Key}' and DeletionMark eq false`, $top: 1 });
       contractKey = contracts[0]?.Ref_Key;
     }
-    if (!contractKey) {
+    if (!prev && !contractKey) {
       const ct = (await odataGetAll(c, 'Catalog_ДоговорыКонтрагентов', { $filter: 'DeletionMark eq false', $orderby: 'Code desc', $top: 1 }))[0];
       if (!ct) throw new Error('Нет образца договора в 1С');
       const made = await odataPost(c, 'Catalog_ДоговорыКонтрагентов', {
@@ -108,14 +113,14 @@ export async function createInvoice(dealId, { amount, service }) {
     const now = new Date();
     const text = String(service || '').trim() || SERVICE_TEXT;
     const row = (tpl.Услуги || [])[0] || {};
-    const doc = await odataPost(c, 'Document_СчетНаОплатуПокупателю', {
+    const doc = prev || await odataPost(c, 'Document_СчетНаОплатуПокупателю', {
       Date: localIso(now), Posted: false,
-      Организация_Key: tpl.Организация_Key, Контрагент_Key: client.Ref_Key, ДоговорКонтрагента_Key: contractKey,
+      Организация_Key: tpl.Организация_Key, Контрагент_Key: client?.Ref_Key, ДоговорКонтрагента_Key: contractKey,
       ВалютаДокумента_Key: tpl.ВалютаДокумента_Key, КратностьВзаиморасчетов: tpl.КратностьВзаиморасчетов, КурсВзаиморасчетов: tpl.КурсВзаиморасчетов,
       Склад_Key: tpl.Склад_Key, СтруктурнаяЕдиница: tpl.СтруктурнаяЕдиница, СтруктурнаяЕдиница_Type: tpl.СтруктурнаяЕдиница_Type,
       Автор_Key: tpl.Автор_Key, Ответственный_Key: respKey,
       СуммаВключаетНДС: false, УчитыватьНДС: false, СуммаВключаетАкциз: false, УчитыватьАкциз: false,
-      СуммаДокумента: amount, Комментарий: `Сделка Битрикс24 #${dealId}`,
+      СуммаДокумента: amount, Комментарий: marker,
       Услуги: [{ LineNumber: '1', Содержание: text, Количество: 1, Цена: amount, Сумма: amount, СтавкаНДС_Key: row.СтавкаНДС_Key || EMPTY, СуммаНДС: 0, Номенклатура_Key: row.Номенклатура_Key }],
     });
     const number = String(doc.Number || '').trim();
@@ -124,15 +129,16 @@ export async function createInvoice(dealId, { amount, service }) {
     // 5. Смарт-счёт в Битриксе, привязанный к сделке
     const sample = (await bx('crm.item.list', { entityTypeId: BX_INVOICE, filter: { categoryId: BX_CATEGORY }, order: { id: 'DESC' }, select: ['id', 'mycompanyId'] })).result?.items?.[0];
     const close = new Date(now.getTime() + TERM_DAYS * 86400000);
-    const item = (await bx('crm.item.add', {
+    let item;
+    try { item = (await bx('crm.item.add', {
       entityTypeId: BX_INVOICE,
       fields: {
         title: `Счет № ${shortNo} по клиенту ${clientName}`, categoryId: BX_CATEGORY, stageId: BX_STAGE_NEW,
         parentId2: dealId, contactId: Number(deal.CONTACT_ID) || undefined, companyId: Number(deal.COMPANY_ID) || undefined,
         opportunity: amount, currencyId: 'KZT', assignedById: deal.ASSIGNED_BY_ID, mycompanyId: sample?.mycompanyId,
-        accountNumber: shortNo, begindate: fmtDate(now), closedate: fmtDate(close),
+        accountNumber: `1С-${shortNo}`, begindate: fmtDate(now), closedate: fmtDate(close),
       },
-    })).result?.item;
+    })).result?.item; } catch (e) { throw new Error(`Счёт № ${shortNo} создан в 1С, но Битрикс его не принял: ${e.message}. Нажмите кнопку ещё раз, дубль в 1С не создастся.`); }
     try { await bx('crm.timeline.comment.add', { fields: { ENTITY_ID: dealId, ENTITY_TYPE: 'deal', COMMENT: `Выставлен счёт № ${shortNo} на ${amount} ₸ (1С «Мой арбитр»)` } }); } catch { /* комментарий не критичен */ }
 
     return {
