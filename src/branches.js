@@ -7,6 +7,7 @@ import { bx, bxAll, bitrixEnabled } from './bitrixApi.js';
 
 const file = path.join(config.root, 'data', 'branch-index.json');
 const TTL = 60 * 60 * 1000;
+const VERSION = 2; // меняется при смене формата индекса, старый файл тогда перестраивается
 
 // "2.5. ФОП. Караганда" -> Караганда, "1.2. Филиал. Алматы НУР" -> Алматы, "1. Голова. ..." -> Голова
 export function branchOfFunnel(name) {
@@ -46,18 +47,29 @@ async function build() {
   const contactName = new Map(contacts.map(c => [String(c.ID), [c.LAST_NAME, c.NAME, c.SECOND_NAME].filter(Boolean).join(' ')]));
   const companyName = new Map(companies.map(c => [String(c.ID), c.TITLE]));
   const byFull = {}, byTwo = {};
+  // Запись: [филиал, ответственный, последняя сделка, карточка клиента].
+  // Филиал берём из последней сделки в филиальной воронке, ссылку на сделку из самой последней сделки вообще.
+  const put = (map, k, br, user, deal, ent) => {
+    if (!k) return;
+    const prev = map[k];
+    map[k] = [br || prev?.[0] || '', br ? user : prev?.[1] || user, deal || prev?.[2] || '', ent || prev?.[3] || ''];
+  };
+  // Сначала все контакты и компании без сделок: даст хотя бы ссылку на карточку
+  for (const [id, n] of contactName) { put(byFull, nameKey(n), '', '', '', 'contact:' + id); put(byTwo, twoKey(n), '', '', '', 'contact:' + id); }
+  for (const [id, n] of companyName) { put(byFull, nameKey(n), '', '', '', 'company:' + id); put(byTwo, twoKey(n), '', '', '', 'company:' + id); }
   for (const d of deals) { // по возрастанию ID: поздняя сделка перезаписывает раннюю
-    const br = funnelBranch.get(String(d.CATEGORY_ID));
-    if (!br) continue;
-    const names = [contactName.get(String(d.CONTACT_ID)), companyName.get(String(d.COMPANY_ID))].filter(Boolean);
-    for (const n of names) {
-      const v = [br, String(d.ASSIGNED_BY_ID || ''), String(d.ID)];
-      const k = nameKey(n); if (k) byFull[k] = v;
-      const t = twoKey(n); if (t) byTwo[t] = v;
+    const br = funnelBranch.get(String(d.CATEGORY_ID)) || '';
+    const user = String(d.ASSIGNED_BY_ID || '');
+    const parts = [[contactName.get(String(d.CONTACT_ID)), 'contact:' + d.CONTACT_ID], [companyName.get(String(d.COMPANY_ID)), 'company:' + d.COMPANY_ID]];
+    for (const [n, ent] of parts) {
+      if (!n) continue;
+      put(byFull, nameKey(n), br, user, String(d.ID), ent);
+      put(byTwo, twoKey(n), br, user, String(d.ID), ent);
     }
   }
   const deptBranch = new Map(depts.map(d => [String(d.ID), branchOfDept(d.NAME)]));
   const idx = {
+    version: VERSION,
     builtAt: Date.now(),
     branches: [...new Set([...funnelBranch.values()].filter(Boolean))].sort(),
     byFull, byTwo,
@@ -71,7 +83,7 @@ async function build() {
 
 function load() {
   if (index) return index;
-  try { index = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* нет файла */ }
+  try { const i = JSON.parse(fs.readFileSync(file, 'utf8')); if (i.version === VERSION) index = i; } catch { /* нет файла */ }
   return index;
 }
 
@@ -87,12 +99,14 @@ export async function getBranchIndex({ force = false } = {}) {
   return cur && !force ? cur : building;
 }
 
-// -> { branch, userId } по имени клиента, пустые значения, если сделок нет
+// -> { branch, userId, dealId, entity } по имени клиента; пустые значения, если в Битриксе не нашли
 export function branchOfClient(idx, name) {
-  if (!idx) return { branch: '', userId: '', dealId: '' };
-  const two = String(name).split(/\s+/).slice(0, 2).join(' ');
-  const v = idx.byFull[nameKey(name)] || idx.byFull[nameKey(two)] || idx.byTwo[twoKey(name)];
-  return v ? { branch: Array.isArray(v) ? v[0] : v, userId: Array.isArray(v) ? v[1] : '', dealId: Array.isArray(v) ? v[2] || '' : '' } : { branch: '', userId: '', dealId: '' };
+  const none = { branch: '', userId: '', dealId: '', entity: '' };
+  if (!idx) return none;
+  const n = String(name).trim();
+  const two = n.split(/\s+/).slice(0, 2).join(' ');
+  const v = idx.byFull[nameKey(n)] || idx.byFull[nameKey(two)] || idx.byTwo[twoKey(n)];
+  return v ? { branch: v[0] || '', userId: v[1] || '', dealId: v[2] || '', entity: v[3] || '' } : none;
 }
 
 // Филиал менеджера (по его отделу в Битриксе)

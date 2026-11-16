@@ -112,7 +112,7 @@
 
   const COLS = {
     clients: [
-      { k: 'name', t: 'Клиент', f: c => `${esc(c.name)}${dealLink(c.dealId)}<div class="sub">${state.company === 'all' ? esc(c.company) + ' · ' : ''}${esc(c.bin)}${c.managers.length ? ' · ' + esc(c.managers.join(', ')) : ''}</div>` },
+      { k: 'name', t: 'Клиент', f: c => `${esc(c.name)}${bxLinks(c)}<div class="sub">${[state.company === 'all' ? c.company : '', c.bin, c.managers.join(', ')].filter(Boolean).map(esc).join(' · ')}</div>` },
       { k: 'branch', t: 'Филиал', f: c => c.branch ? esc(c.branch) : '<span class="muted">—</span>' },
       { k: 'invoicesSum', t: 'Счета за период', n: 1, f: c => c.invoicesCount ? `${money(c.invoicesSum)}<div class="sub">${c.invoicesCount} шт.</div>` : '<span class="muted">—</span>' },
       { k: 'paid', t: 'Оплачено', n: 1, f: c => c.paid ? `<span class="pos">${money(c.paid)}</span>` : '<span class="muted">—</span>' },
@@ -124,7 +124,7 @@
     ],
     invoices: [
       { k: 'date', t: 'Дата', f: i => date(i.date) },
-      { k: 'number', t: 'Номер', f: i => esc(i.number) + dealLink(i.dealId) + (i.posted ? '' : ' <span class="pill">не проведён</span>') },
+      { k: 'number', t: 'Номер', f: i => esc(i.number.replace(/^0+/, '')) + bxLinks(i) + (i.posted ? '' : ' <span class="pill">не проведён</span>') },
       { k: 'client', t: 'Клиент', f: i => esc(i.client) + (state.company === 'all' ? `<div class="sub">${esc(i.company)}</div>` : '') },
       { k: 'branch', t: 'Филиал', f: i => i.branch ? esc(i.branch) : '<span class="muted">—</span>' },
       { k: 'manager', t: 'Ответственный', f: i => esc(i.manager) },
@@ -142,9 +142,16 @@
   };
 
   // Ссылка на последнюю сделку клиента в Битриксе
-  const dealLink = id => id ? ` <a href="#" class="deal-link" data-deal="${esc(id)}" title="Открыть сделку в Битриксе">сделка ↗</a>` : '';
-  function openDeal(id) {
-    const path = `/crm/deal/details/${id}/`;
+  // Ссылки в Битрикс: сделка (в ней же вкладка «Счета») и карточка клиента
+  const ENT = { contact: 'клиент', company: 'компания' };
+  const bxLinks = x => {
+    const a = (path, text, title) => ` <a href="#" class="deal-link" data-path="${esc(path)}" title="${title}">${text} ↗</a>`;
+    let h = x.dealId ? a(`/crm/deal/details/${x.dealId}/`, 'сделка', 'Открыть сделку в Битриксе, счета клиента во вкладке «Счета»') : '';
+    const [t, id] = String(x.bxEntity || '').split(':');
+    if (ENT[t] && id && id !== '0') h += a(`/crm/${t}/details/${id}/`, ENT[t], 'Открыть карточку клиента в Битриксе');
+    return h;
+  };
+  function openDeal(path) {
     if (window.BX24 && BX24.openPath) { try { BX24.openPath(path); return; } catch { /* ниже откроем вкладкой */ } }
     window.open('https://' + (BOOT.portal || 'myarbitr.bitrix24.kz') + path, '_blank', 'noopener');
   }
@@ -289,7 +296,7 @@
   $('csv').addEventListener('click', () => state.data && csv());
   $('tbl').addEventListener('click', e => {
     const dl = e.target.closest('a.deal-link');
-    if (dl) { e.preventDefault(); e.stopPropagation(); return openDeal(dl.dataset.deal); }
+    if (dl) { e.preventDefault(); e.stopPropagation(); return openDeal(dl.dataset.path); }
     const th = e.target.closest('th');
     if (th) {
       const k = th.dataset.k;

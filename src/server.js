@@ -122,12 +122,17 @@ function parseDate(s, fallback) {
 function applyScope(rep, scope, idx, branchFilter) {
   const clients = rep.clients.map(c => {
     const b = branchOfClient(idx, c.name);
-    return { ...c, branch: b.branch || branchOfManager(idx, c.owner) || '', bxUser: b.userId, dealId: b.dealId };
+    return { ...c, branch: b.branch || branchOfManager(idx, c.owner) || '', bxUser: b.userId, dealId: b.dealId, bxEntity: b.entity };
   });
   const branchList = [...new Set(clients.map(c => c.branch).filter(Boolean))].sort();
   let out = { ...rep, clients, branches: branchList, role: scope?.role };
   const byId = new Map(clients.map(c => [c.id, c]));
-  out.invoices = rep.invoices.map(i => ({ ...i, branch: byId.get(i.clientId)?.branch || '', dealId: byId.get(i.clientId)?.dealId || '' }));
+  // Счёт, выставленный из сделки через приложение, ведёт в свою сделку; остальные в последнюю сделку клиента
+  out.invoices = rep.invoices.map(i => {
+    const c = byId.get(i.clientId);
+    const own = /Сделка Битрикс24 #(\d+)/.exec(i.comment || '')?.[1];
+    return { ...i, branch: c?.branch || '', dealId: own || c?.dealId || '', bxEntity: c?.bxEntity || '' };
+  });
   if (!scope) return { ...out, clients: [], invoices: [] };
   if (scope.role === 'director') {
     const set = new Set(scope.branches);
