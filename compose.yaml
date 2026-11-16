@@ -1,0 +1,18 @@
+services:
+  arbitr-1c:
+    build: .
+    container_name: arbitr-1c
+    restart: unless-stopped
+    env_file: .env
+    mem_limit: 128m
+    volumes:
+      - arbitr_data:/app/data
+    networks:
+      - bashnya_default
+
+volumes:
+  arbitr_data:
+
+networks:
+  bashnya_default:
+    external: true

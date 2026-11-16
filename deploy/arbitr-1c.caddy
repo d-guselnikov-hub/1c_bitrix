@@ -1,0 +1,12 @@
+# Кладётся в /opt/bashnya/deploy/tenants/arbitr-1c.caddy (подхватывается import в основном Caddyfile)
+# Общий блок (site) из bashnya не подключаем: в нём X-Frame-Options DENY, а Битриксу нужен iframe.
+# Защита от чужих фреймов делается самим приложением: frame-ancestors только myarbitr.bitrix24.kz
+arbitr.bashnya.dev {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+	reverse_proxy arbitr-1c:3010
+}

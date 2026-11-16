@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Выставить счёт</title>
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<style>
+body{font:14px system-ui,sans-serif;color:#222;margin:0;padding:16px;background:#fff}
+h2{margin:0 0 12px;font-size:17px}.row{margin:10px 0}label{display:block;font-size:12px;color:#666;margin-bottom:3px}
+input{width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccd;border-radius:6px;font:inherit}
+button{padding:9px 18px;border:0;border-radius:6px;background:#2fc6f6;color:#fff;font:inherit;cursor:pointer}button:disabled{opacity:.5}
+.muted{color:#777;font-size:12px}.err{color:#c0392b;margin:10px 0}.ok{background:#eefaf0;border:1px solid #bde5c4;border-radius:8px;padding:14px;margin-top:12px}
+.inv{border:1px solid #ccd;border-radius:8px;padding:16px;margin-top:12px}.inv b{font-size:16px}.old{margin-top:14px;font-size:13px}
+</style></head><body>
+<h2>Выставить счёт · ТОО «Мой арбитр»</h2>
+<div id="box">Загрузка…</div>
+<script>
+/*__BOOT__*/
+const B = window.__BOOT__;
+const box = document.getElementById('box');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => new Intl.NumberFormat('ru-RU').format(n) + ' ₸';
+async function api(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session': B.session }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Ошибка ' + r.status);
+  return j;
+}
+function showInvoice(r) {
+  box.innerHTML = `<div class="ok">Счёт создан и сохранён в сделке.</div>
+  <div class="inv"><b>Счёт на оплату № ${esc(r.number)} от ${esc(r.date)}</b>
+  <div class="row">Плательщик: ${esc(r.client)}${r.createdClient ? ' <span class="muted">(новый контрагент в 1С)</span>' : ''}</div>
+  <div class="row">${esc(r.service)}: <b>${money(r.amount)}</b></div>
+  <div class="row muted">Оплатить до ${esc(r.dueDate)} · ТОО «Мой арбитр»</div>
+  <button onclick="window.print()">Печать</button></div>`;
+}
+async function init() {
+  try {
+    const p = await api('/api/invoice/preview', { dealId: B.dealId });
+    const old = (p.existing || []).map(i => `<div>${esc(i.title)} · ${money(i.opportunity)}</div>`).join('');
+    box.innerHTML = `<div class="row muted">Сделка: ${esc(p.title)}</div>
+    <div class="row"><label>Клиент</label><input value="${esc(p.client)}" disabled>
+      <div class="muted">${p.clientInOneC ? 'Найден в 1С' : 'В 1С не найден, будет создан'}</div></div>
+    <div class="row"><label>Услуга</label><input id="svc" value="${esc(p.service)}"></div>
+    <div class="row"><label>Сумма, ₸</label><input id="amt" type="number" min="1" value="${p.amount || ''}"></div>
+    <div id="err" class="err"></div>
+    <button id="go">Выставить счёт</button>
+    ${old ? `<div class="old"><div class="muted">Уже выставлены по сделке:</div>${old}</div>` : ''}`;
+    document.getElementById('go').onclick = async e => {
+      const btn = e.target; btn.disabled = true; document.getElementById('err').textContent = '';
+      try { showInvoice(await api('/api/invoice/create', { dealId: B.dealId, amount: document.getElementById('amt').value, service: document.getElementById('svc').value })); }
+      catch (err) { document.getElementById('err').textContent = err.message; btn.disabled = false; }
+    };
+  } catch (e) { box.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+if (window.BX24) BX24.init(() => { try { BX24.fitWindow(); } catch {} init(); }); else init();
+</script></body></html>

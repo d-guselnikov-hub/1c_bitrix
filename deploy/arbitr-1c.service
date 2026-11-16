@@ -1,0 +1,16 @@
+# /etc/systemd/system/arbitr-1c.service
+[Unit]
+Description=Arbitr: Bitrix24 app with 1C Fresh receivables
+After=network-online.target
+
+[Service]
+Type=simple
+User=arbitr
+WorkingDirectory=/opt/arbitr-1c-app
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
