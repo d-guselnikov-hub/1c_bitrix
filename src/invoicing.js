@@ -1,6 +1,6 @@
 // Выставление счёта из сделки Битрикса: счёт на оплату в 1С («Мой арбитр») + смарт-счёт в Битриксе у сделки.
 import { companies } from './config.js';
-import { odataGetAll, odataPost } from './odata.js';
+import { odataGetAll, odataPost, odataPatch } from './odata.js';
 import { bx } from './bitrixApi.js';
 import { nameKey } from './branches.js';
 import { sameName } from './report.js';
@@ -53,6 +53,21 @@ export async function preview(dealId) {
 }
 
 const locks = new Set();
+const money = n => Math.round(n).toLocaleString('ru-RU').replace(/\u00a0/g, ' ') + ' ₸';
+
+// Пишет сумму договора из сделки Битрикса в комментарий договора 1С; ошибка не мешает основному действию
+export async function syncContractSum(c, contractKey, deal) {
+  const sum = Number(deal.OPPORTUNITY) || 0;
+  if (!sum) return;
+  const line = `Сумма договора ${money(sum)} (сделка Битрикс24 #${deal.ID})`;
+  try {
+    const cur = (await odataGetAll(c, 'Catalog_ДоговорыКонтрагентов', { $filter: `Ref_Key eq guid'${contractKey}'`, $select: 'Ref_Key,Комментарий' }))[0];
+    if (!cur) return;
+    const rest = String(cur.Комментарий || '').split('\n').filter(l => !/^Сумма договора .* \(сделка Битрикс24 #\d+\)$/.test(l.trim()));
+    const next = [line, ...rest].join('\n').trim();
+    if (next !== String(cur.Комментарий || '').trim()) await odataPatch(c, 'Catalog_ДоговорыКонтрагентов', contractKey, { Комментарий: next });
+  } catch (e) { console.error('[contract]', e.message); }
+}
 
 export async function createInvoice(dealId, { amount, service }) {
   amount = Number(amount);
@@ -99,6 +114,9 @@ export async function createInvoice(dealId, { amount, service }) {
       });
       contractKey = made.Ref_Key;
     }
+
+    // 2а. Сумма договора из сделки в комментарий договора 1С (отдельного поля суммы в договоре нет)
+    if (contractKey && contractKey !== EMPTY) await syncContractSum(c, contractKey, deal);
 
     // 3. Ответственный: 1С-пользователь с тем же именем, что и ответственный по сделке
     let respKey = tpl.Ответственный_Key;

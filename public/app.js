@@ -120,6 +120,8 @@
       { k: 'overdue', t: 'Просрочено', n: 1, f: c => c.overdue > 0 ? `<span class="neg">${money(c.overdue)}</span>` : '<span class="muted">—</span>' },
       { k: 'maxDaysOverdue', t: 'Дней', n: 1, f: c => daysPill(c.maxDaysOverdue, c.overdue) },
       { k: 'advance', t: 'Аванс', n: 1, f: c => c.advance > 0 ? money(c.advance) : '<span class="muted">—</span>' },
+      { k: 'contractLeft', t: 'По договору', n: 1, f: c => c.contract && c.contract.sum ? `${money(c.contract.left)}<div class="sub">осталось из ${money(c.contract.sum)}</div>${c.contract.overdue > 0 ? `<div class="sub neg">просрочено ${money(c.contract.overdue)}</div>` : ''}` : '<span class="muted">—</span>' },
+      { k: 'nextPay', t: 'След. платёж', f: c => c.contract?.next ? `${date(c.contract.next)}<div class="sub">${money(c.contract.nextSum)}</div>` : '<span class="muted">—</span>' },
       { k: 'lastPayment', t: 'Посл. оплата', f: c => c.lastPayment ? date(c.lastPayment) : '<span class="muted">нет</span>' },
     ],
     invoices: [
@@ -221,6 +223,12 @@
     return `<div class="detail-grid">
       <div><b>Возраст долга</b><table>${aging}</table>
         <div class="sub" style="margin-top:6px">Начислено за период: ${money(c.accrued)}</div></div>
+      ${c.contract ? `<div><b>Договор в Битриксе</b><table>
+        <tr><td>Сумма договора</td><td class="n">${money(c.contract.sum)}</td></tr>
+        <tr><td>Оплачено по счетам</td><td class="n pos">${money(c.contract.paid)}</td></tr>
+        <tr><td>Осталось</td><td class="n">${money(c.contract.left)}</td></tr>
+        <tr><td>Просрочено по графику</td><td class="n ${c.contract.overdue > 0 ? 'neg' : ''}">${money(c.contract.overdue)}${c.contract.overdueCount ? ` <span class="sub">(${c.contract.overdueCount} шт.)</span>` : ''}</td></tr>
+        <tr><td>Следующий платёж</td><td class="n">${c.contract.next ? date(c.contract.next) + ' · ' + money(c.contract.nextSum) : '—'}</td></tr></table></div>` : ''}
       <div><b>Счета за период</b><table><thead><tr><th>Дата</th><th>Номер</th><th>Ответственный</th><th class="n">Сумма</th></tr></thead>${invRows}</table></div>
     </div>`;
   }
@@ -231,7 +239,7 @@
     const plain = {
       clients: [['Компания', 'company'], ['Клиент', 'name'], ['БИН/ИИН', 'bin'], ['Счетов', 'invoicesCount'], ['Сумма счетов', 'invoicesSum'], ['Начислено', 'accrued'],
         ['Оплачено', 'paid'], ['Долг', 'debt'], ['Просрочено', 'overdue'], ['Макс. дней просрочки', 'maxDaysOverdue'], ['Аванс', 'advance'],
-        ...BUCKETS.map(b => [BUCKET_LABEL[b], r => r.aging[b]]), ['Последняя оплата', r => date(r.lastPayment)], ['Менеджеры', r => r.managers.join(', ')]],
+        ...BUCKETS.map(b => [BUCKET_LABEL[b], r => r.aging[b]]), ['Сумма договора (Битрикс)', r => r.contract?.sum ?? ''], ['Оплачено по договору', r => r.contract?.paid ?? ''], ['Осталось по договору', r => r.contract?.left ?? ''], ['Просрочено по графику', r => r.contract?.overdue ?? ''], ['След. платёж', r => r.contract?.next ? date(r.contract.next) : ''], ['Сумма след. платежа', r => r.contract?.nextSum ?? ''], ['Последняя оплата', r => date(r.lastPayment)], ['Менеджеры', r => r.managers.join(', ')]],
       invoices: [['Компания', 'company'], ['Дата', r => date(r.date)], ['Номер', 'number'], ['Клиент', 'client'], ['Ответственный', 'manager'], ['Сумма', 'sum'], ['Долг клиента', 'clientDebt']],
       managers: cols.map(c => [c.t, c.k]),
     }[state.tab];

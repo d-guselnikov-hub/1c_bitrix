@@ -118,3 +118,28 @@ export async function odataPost(conn, entity, body, { timeoutMs = 60000 } = {}) 
   }
   return JSON.parse(text);
 }
+
+// Изменение реквизитов объекта: PATCH Entity(guid'...')
+export async function odataPatch(conn, entity, ref, body, { timeoutMs = 60000 } = {}) {
+  if (!conn?.url) throw new ODataError(`База 1С «${conn?.name || '?'}» не подключена`, 0, '');
+  const url = buildUrl(conn, `${entity}(guid'${ref}')`, {});
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'PATCH',
+      headers: { Authorization: authHeader(conn), Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal: ctrl.signal,
+    });
+  } catch (err) {
+    throw new ODataError(`Нет связи с 1С: ${err.message}`, 0, url);
+  } finally { clearTimeout(t); }
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text.slice(0, 600);
+    try { msg = JSON.parse(text)['odata.error']?.message?.value || msg; } catch { /* не JSON */ }
+    throw new ODataError(`1С отклонила изменение (${entity}): ${msg}`, res.status, url);
+  }
+  return text ? JSON.parse(text) : {};
+}

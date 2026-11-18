@@ -74,7 +74,8 @@ td .sub { color: var(--muted); font-size: 12px; }
 .pill.ok { background: #f1f8e0; color: #5a8000; }
 .mini { display: flex; height: 6px; width: 120px; border-radius: 3px; overflow: hidden; background: #f0f2f4; margin-top: 4px; }
 tr.detail td { background: #fafbfc; padding: 12px 16px; }
-.detail-grid { display: grid; grid-template-columns: 260px 1fr; gap: 20px; }
+.detail-grid { display: grid; grid-template-columns: 240px auto 1fr; gap: 20px; }
+.detail-grid > div:only-child, .detail-grid > div:nth-child(2):last-child { grid-column: span 2; }
 .detail-grid table td, .detail-grid table th { padding: 4px 8px; }
 .empty { text-align: center; color: var(--muted); padding: 30px; }
 .foot { color: var(--muted); font-size: 12px; text-align: right; }

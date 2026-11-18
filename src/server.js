@@ -4,6 +4,7 @@ import express from 'express';
 import { config } from './config.js';
 import { buildReport } from './report.js';
 import { companies } from './config.js';
+import { runReminders, startReminders } from './reminders.js';
 import { getBranchIndex, branchOfClient, branchOfManager } from './branches.js';
 import { scopeReport, sameName } from './report.js';
 import { verifyBitrixLaunch, signSession, readSession } from './bitrix.js';
@@ -125,7 +126,10 @@ function parseDate(s, fallback) {
 function applyScope(rep, scope, idx, branchFilter) {
   const clients = rep.clients.map(c => {
     const b = branchOfClient(idx, c.name);
-    return { ...c, branch: b.branch || branchOfManager(idx, c.owner) || '', bxUser: b.userId, dealId: b.dealId, bxEntity: b.entity };
+    const k = b.dealId ? idx?.contracts?.[b.dealId] : null;
+    const contract = k ? { sum: k.sum, paid: k.paid, left: Math.max(0, k.sum - k.paid), overdue: k.overdue, overdueCount: k.overdueCount, next: k.next, nextSum: k.nextSum } : null;
+    return { ...c, branch: b.branch || branchOfManager(idx, c.owner) || '', bxUser: b.userId, dealId: b.dealId, bxEntity: b.entity, contract,
+      contractLeft: contract ? contract.left : null, contractOverdue: contract ? contract.overdue : null, nextPay: contract?.next || '' };
   });
   const branchList = [...new Set(clients.map(c => c.branch).filter(Boolean))].sort();
   let out = { ...rep, clients, branches: branchList, role: scope?.role };
@@ -210,6 +214,14 @@ app.put('/api/access', requireSession, requireAdmin, (req, res) => {
   res.json(acc);
 });
 
+// Напоминания: ?dry=1 показывает, что будет создано; POST создаёт сейчас
+app.get('/api/admin/reminders', requireSession, requireAdmin, async (req, res) => {
+  try { res.json(await runReminders({ dry: true })); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post('/api/admin/reminders', requireSession, requireAdmin, async (req, res) => {
+  try { res.json(await runReminders()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 app.get('/api/branches', requireSession, requireAdmin, async (req, res) => {
   const idx = await getBranchIndex({ force: req.query.refresh === '1' }).catch(() => null);
   res.json({ branches: idx?.branches || [], builtAt: idx?.builtAt || null, stats: idx?.stats || null });
@@ -219,5 +231,6 @@ app.get('/health', (req, res) => res.json({ ok: true, mock: config.mock }));
 
 getBranchIndex().catch(e => console.error('[branches]', e.message));
 app.listen(config.port, () => {
+  startReminders();
   console.log(`[arbitr-1c] порт ${config.port}, ${config.mock ? 'MOCK-данные' : '1С: ' + config.odataUrl}${config.devNoAuth ? ', БЕЗ авторизации' : ''}`);
 });

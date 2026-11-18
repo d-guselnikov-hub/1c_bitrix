@@ -7,7 +7,7 @@ import { bx, bxAll, bitrixEnabled } from './bitrixApi.js';
 
 const file = path.join(config.root, 'data', 'branch-index.json');
 const TTL = 60 * 60 * 1000;
-const VERSION = 2; // меняется при смене формата индекса, старый файл тогда перестраивается
+const VERSION = 3; // меняется при смене формата индекса, старый файл тогда перестраивается
 
 // "2.5. ФОП. Караганда" -> Караганда, "1.2. Филиал. Алматы НУР" -> Алматы, "1. Голова. ..." -> Голова
 export function branchOfFunnel(name) {
@@ -38,7 +38,7 @@ async function build() {
   const funnelBranch = new Map(cats.map(c => [String(c.id), branchOfFunnel(c.name)]));
   // воронка «Основная» (id 0) в списке тоже есть, но филиала не даёт
 
-  const deals = await bxAll('crm.deal.list', { select: ['ID', 'CATEGORY_ID', 'CONTACT_ID', 'COMPANY_ID', 'ASSIGNED_BY_ID'], order: { ID: 'ASC' } });
+  const deals = await bxAll('crm.deal.list', { select: ['ID', 'CATEGORY_ID', 'CONTACT_ID', 'COMPANY_ID', 'ASSIGNED_BY_ID', 'OPPORTUNITY'], order: { ID: 'ASC' } });
   const contacts = await bxAll('crm.contact.list', { select: ['ID', 'NAME', 'LAST_NAME', 'SECOND_NAME'] });
   const companies = await bxAll('crm.company.list', { select: ['ID', 'TITLE'] });
   const users = await bxAll('user.get', { filter: { ACTIVE: true } });
@@ -67,14 +67,30 @@ async function build() {
       put(byTwo, twoKey(n), br, user, String(d.ID), ent);
     }
   }
+  // Договор и график по сделкам: сумма сделки и смарт-счета рассрочки (entityTypeId 31)
+  const used = new Set([...Object.values(byFull), ...Object.values(byTwo)].map(v => v[2]).filter(Boolean));
+  const invs = await bxAll('crm.item.list', { entityTypeId: 31, filter: { '!stageId': 'DT31_3:UC_CANCELED' }, select: ['id', 'parentId2', 'stageId', 'opportunity', 'closedate'] }, j => j.result?.items);
+  const today = new Date().toISOString().slice(0, 10);
+  const contracts = {};
+  for (const d of deals) if (used.has(String(d.ID))) contracts[d.ID] = { sum: Number(d.OPPORTUNITY) || 0, paid: 0, overdue: 0, overdueCount: 0, next: '', nextSum: 0, count: 0 };
+  for (const i of invs) {
+    const k = contracts[i.parentId2]; if (!k) continue;
+    const sum = Number(i.opportunity) || 0, due = String(i.closedate || '').slice(0, 10);
+    k.count++;
+    if (i.stageId === 'DT31_3:P') { k.paid += sum; continue; }
+    if (due && due < today) { k.overdue += sum; k.overdueCount++; }
+    else if (due && (!k.next || due < k.next)) { k.next = due; k.nextSum = sum; }
+  }
+  for (const [id, k] of Object.entries(contracts)) if (!k.sum && !k.count) delete contracts[id];
   const deptBranch = new Map(depts.map(d => [String(d.ID), branchOfDept(d.NAME)]));
   const idx = {
+    contracts,
     version: VERSION,
     builtAt: Date.now(),
     branches: [...new Set([...funnelBranch.values()].filter(Boolean))].sort(),
     byFull, byTwo,
     users: users.map(u => ({ id: String(u.ID), name: [u.LAST_NAME, u.NAME].filter(Boolean).join(' '), branch: branchOfDepts(u.UF_DEPARTMENT || [], deptBranch) })),
-    stats: { deals: deals.length, contacts: contacts.length, companies: companies.length },
+    stats: { deals: deals.length, contacts: contacts.length, companies: companies.length, invoices: invs.length },
   };
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(idx));
